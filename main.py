@@ -31,6 +31,11 @@ VIDEO_ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]{11}$")
 
 # Read API key from environment. Do not hard-code secrets in the code.
 API_KEY: Optional[str] = os.getenv("API_KEY")
+TRANSCRIPT_LANGUAGES = [
+    language.strip()
+    for language in os.getenv("TRANSCRIPT_LANGUAGES", "").split(",")
+    if language.strip()
+]
 
 # Header object to extract the API key from requests. Setting ``auto_error=False``
 # allows us to handle missing keys manually.
@@ -65,6 +70,45 @@ def extract_video_id_from_url(url: str) -> Optional[str]:
             return candidate if is_valid_video_id(candidate) else None
 
     return None
+
+
+def fetch_best_transcript(video_id: str):
+    """Fetch the best available transcript for a video.
+
+    When ``TRANSCRIPT_LANGUAGES`` is configured, language order is respected
+    first and manual transcripts are preferred over auto-generated ones within
+    each language. If none of the preferred languages is available, the
+    function falls back to the first available transcript, still preferring
+    manual transcripts.
+    """
+    transcript_list = YouTubeTranscriptApi().list(video_id)
+    transcripts = list(transcript_list)
+    if not transcripts:
+        raise CouldNotRetrieveTranscript(video_id)
+
+    for language_code in TRANSCRIPT_LANGUAGES:
+        language_matches = [
+            transcript for transcript in transcripts if transcript.language_code == language_code
+        ]
+        if language_matches:
+            language_matches.sort(key=lambda transcript: transcript.is_generated)
+            return language_matches[0].fetch()
+
+    transcripts.sort(key=lambda transcript: transcript.is_generated)
+    return transcripts[0].fetch()
+
+
+def serialize_transcript(video_id: str, transcript) -> dict:
+    """Convert a fetched transcript object into the public API response shape."""
+    transcript_items = transcript.to_raw_data()
+    response = {
+        "videoId": video_id,
+        "text": " ".join(entry.get("text", "") for entry in transcript_items),
+        "source": "youtube_transcript_api",
+    }
+    if transcript.language:
+        response["language"] = transcript.language
+    return response
 
 
 async def verify_api_key(provided_key: Optional[str] = Depends(api_key_header)) -> None:
@@ -125,20 +169,49 @@ async def get_transcript(videoId: str, _: None = Depends(verify_api_key)) -> dic
         raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
 
     try:
-        transcript = YouTubeTranscriptApi().fetch(videoId)
+        transcript = fetch_best_transcript(videoId)
     except CouldNotRetrieveTranscript:
         raise HTTPException(status_code=404, detail="Transcript not available for this video")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    transcript_items = transcript.to_raw_data()
-    text = " ".join(entry.get("text", "") for entry in transcript_items)
+    return serialize_transcript(videoId, transcript)
 
-    response = {
-        "videoId": videoId,
-        "text": text,
-        "source": "youtube_transcript_api",
-    }
-    if transcript.language:
-        response["language"] = transcript.language
-    return response
+
+@app.get(
+    "/transcript-from-url",
+    tags=["Transcript"],
+    summary="Fetch the transcript for a YouTube URL",
+    responses={
+        200: {
+            "description": "Transcript found",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "videoId": "dQw4w9WgXcQ",
+                        "text": "Never gonna give you up, never gonna let you down...",
+                        "language": "en",
+                        "source": "youtube_transcript_api",
+                    }
+                }
+            },
+        },
+        400: {"description": "Invalid YouTube URL"},
+        404: {"description": "Transcript not available"},
+        500: {"description": "Unexpected error"},
+    },
+)
+async def get_transcript_from_url(url: str, _: None = Depends(verify_api_key)) -> dict:
+    """Retrieve the transcript text for the specified YouTube URL."""
+    video_id = extract_video_id_from_url(url)
+    if not video_id:
+        raise HTTPException(status_code=400, detail="Invalid YouTube URL")
+
+    try:
+        transcript = fetch_best_transcript(video_id)
+    except CouldNotRetrieveTranscript:
+        raise HTTPException(status_code=404, detail="Transcript not available for this video")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return serialize_transcript(video_id, transcript)

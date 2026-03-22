@@ -114,10 +114,65 @@
                     }
                   },
                   "required": ["videoId", "text", "source"]
+        }
+      }
+    },
+    "/transcript-from-url": {
+      "get": {
+        "operationId": "getTranscriptFromUrl",
+        "summary": "Retrieve the transcript for a YouTube URL",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Full YouTube video URL"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transcript retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "videoId": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["videoId", "text", "source"]
                 }
               }
             }
           },
+          "400": {
+            "description": "Invalid URL supplied"
+          },
+          "404": {
+            "description": "Transcript not available for this video"
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    }
+  },
           "400": {
             "description": "Invalid YouTube video ID"
           },
