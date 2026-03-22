@@ -21,7 +21,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.security.api_key import APIKeyHeader
 from youtube_transcript_api import CouldNotRetrieveTranscript, YouTubeTranscriptApi
 
@@ -42,6 +42,16 @@ TRANSCRIPT_LANGUAGES = [
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 app = FastAPI(title="YouTube Transcript API", version="1.0.0")
+
+
+@app.middleware("http")
+async def enforce_utf8_json_charset(request: Request, call_next) -> Response:
+    """Make JSON responses explicit about UTF-8 for clients that guess incorrectly."""
+    response = await call_next(request)
+    content_type = response.headers.get("content-type")
+    if content_type and content_type.startswith("application/json") and "charset=" not in content_type:
+        response.headers["content-type"] = "application/json; charset=utf-8"
+    return response
 
 
 def is_valid_video_id(video_id: str) -> bool:
