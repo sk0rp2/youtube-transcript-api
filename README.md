@@ -5,13 +5,13 @@ Simple FastAPI application to fetch YouTube transcripts for a given video ID and
 ## Features
 
 - `GET /health` returns `{ "status": "ok" }` to verify the service is running.
-- `GET /extract-video-id?url=<youtube_url>` extracts a YouTube video ID from common URL formats (e.g., `https://youtu.be/<id>` or `https://www.youtube.com/watch?v=<id>`).
+- `GET /extract-video-id?url=<youtube_url>` extracts a YouTube video ID from common URL formats such as `youtu.be`, `watch`, `embed`, `shorts`, and `live`.
 - `GET /transcript?videoId=<id>` fetches the transcript for the specified YouTube video using `youtube-transcript-api` and returns JSON.
 
 ## Requirements
 
-- Python 3.11+
-- Dependencies listed in `requirements.txt` (FastAPI, uvicorn, youtube-transcript-api, python-dotenv).
+- Python 3.14
+- Dependencies listed in `requirements.txt` (`fastapi`, `uvicorn`, `youtube-transcript-api`, `python-dotenv`)
 
 ## Running locally
 
@@ -23,6 +23,7 @@ Simple FastAPI application to fetch YouTube transcripts for a given video ID and
    ```env
    API_KEY=your-secret-key
    ```
+   The application loads this file automatically via `python-dotenv`.
 3. Start the server:
    ```bash
    uvicorn main:app --host 0.0.0.0 --port 8000
@@ -35,6 +36,14 @@ This repository includes a `Procfile` and `runtime.txt` for easy deployment to p
 
 ## Endpoints
 
-- **`/health`**  – health check endpoint, returns `{"status": "ok"}`.
-- **`/extract-video-id`** – accepts a `url` query parameter and returns the extracted `videoId`.
-- **`/transcript`** – accepts a `videoId` query parameter and returns the transcript for the video. Requires the `X-API-Key` header with the correct key.
+- **`/health`** - health check endpoint, returns `{"status": "ok"}`.
+- **`/extract-video-id`** - accepts a `url` query parameter and returns the extracted `videoId`.
+- **`/transcript`** - accepts a `videoId` query parameter and returns the transcript for the video. Requires the `X-API-Key` header with the correct key.
+
+## Verification
+
+Run the basic verification suite with:
+
+```bash
+python -m unittest discover -s tests
+```

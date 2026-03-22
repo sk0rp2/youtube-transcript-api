@@ -32,12 +32,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "apiKeyAuth": []
-          }
-        ]
+        }
       }
     },
     "/extract-video-id": {
@@ -122,6 +117,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Invalid YouTube video ID"
           },
           "404": {
             "description": "Transcript not available for this video"
