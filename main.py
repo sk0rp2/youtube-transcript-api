@@ -17,12 +17,17 @@ not enforce authentication (useful during local development).
 
 import os
 import re
+import secrets
+from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.security.api_key import APIKeyHeader
+from starlette.concurrency import run_in_threadpool
+
+from mcp_server import OAuthConfig, build_mcp
 from youtube_transcript_api import CouldNotRetrieveTranscript, YouTubeTranscriptApi
 
 load_dotenv()
@@ -41,7 +46,16 @@ TRANSCRIPT_LANGUAGES = [
 # allows us to handle missing keys manually.
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-app = FastAPI(title="YouTube Transcript API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    if mcp is None:
+        yield
+    else:
+        async with mcp.session_manager.run():
+            yield
+
+
+app = FastAPI(title="YouTube Transcript API", version="1.0.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -123,7 +137,7 @@ def serialize_transcript(video_id: str, transcript) -> dict:
 
 async def verify_api_key(provided_key: Optional[str] = Depends(api_key_header)) -> None:
     """Dependency that verifies the provided API key."""
-    if API_KEY and (not provided_key or provided_key != API_KEY):
+    if API_KEY and (not provided_key or not secrets.compare_digest(provided_key.encode(), API_KEY.encode())):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -175,17 +189,7 @@ async def extract_video_id(url: str, _: None = Depends(verify_api_key)) -> dict:
 )
 async def get_transcript(videoId: str, _: None = Depends(verify_api_key)) -> dict:
     """Retrieve the transcript text for the specified YouTube video ID."""
-    if not is_valid_video_id(videoId):
-        raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
-
-    try:
-        transcript = fetch_best_transcript(videoId)
-    except CouldNotRetrieveTranscript:
-        raise HTTPException(status_code=404, detail="Transcript not available for this video")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return serialize_transcript(videoId, transcript)
+    return await run_in_threadpool(retrieve_transcript, videoId)
 
 
 @app.get(
@@ -217,11 +221,26 @@ async def get_transcript_from_url(url: str, _: None = Depends(verify_api_key)) -
     if not video_id:
         raise HTTPException(status_code=400, detail="Invalid YouTube URL")
 
+    return await run_in_threadpool(retrieve_transcript, video_id)
+
+
+def retrieve_transcript(video_id: str) -> dict:
+    """Shared synchronous service used by REST and MCP transports."""
+    if not is_valid_video_id(video_id):
+        raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
+
     try:
         transcript = fetch_best_transcript(video_id)
+        return serialize_transcript(video_id, transcript)
     except CouldNotRetrieveTranscript:
         raise HTTPException(status_code=404, detail="Transcript not available for this video")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Unexpected error retrieving transcript")
 
-    return serialize_transcript(video_id, transcript)
+
+# Mount last so REST routes and OpenAPI keep their existing paths. Mounting at
+# root also preserves the SDK's /.well-known/oauth-protected-resource/mcp route.
+mcp = None
+if os.getenv("MCP_ENABLED", "false").lower() == "true":
+    mcp = build_mcp(OAuthConfig.from_env(), retrieve_transcript, extract_video_id_from_url)
+    app.mount("/", mcp.streamable_http_app())
